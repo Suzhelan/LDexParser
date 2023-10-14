@@ -1,9 +1,13 @@
 package top.linl.dexparser.bean.ids;
 
-public class DexProtoId {
+public class DexProtoId extends BaseId {
     int shorty_idx;
     int return_type_idx;
     int parameters_off;
+
+    public DexProtoId() {
+
+    }
 
     public DexProtoId(int shorty_idx, int return_type_idx, int parameters_off) {
         this.shorty_idx = shorty_idx;

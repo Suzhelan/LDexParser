@@ -27,7 +27,7 @@ public class ConversionUtils {
     public static int bytesToUnsignedShort(byte[] bytes) {
         if (null == bytes || bytes.length == 0) return 0;
         return ((bytes[0] & 0xff) |
-                        ((bytes[1] & 0xff)) << 8);
+                ((bytes[1] & 0xff)) << 8);
     }
 
     /**

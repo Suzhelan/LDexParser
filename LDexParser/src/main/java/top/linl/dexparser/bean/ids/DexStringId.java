@@ -7,7 +7,7 @@ import top.linl.dexparser.util.Utils;
  * @author suzhelan
  * time 2023.9.5
  */
-public class DexStringId {
+public class DexStringId extends BaseId {
 
     /**
      * 字符串
@@ -37,13 +37,18 @@ public class DexStringId {
         this.string_byte_length = string_byte_length;
     }
 
+    public DexStringId() {
+
+    }
+
     public String getString(DexParser parser) {
         if (string_byte_length == 0 || string_data != null) return string_data;
         byte[] string_data = Utils.copyArrays(parser.dexData, string_data_off + 1, string_byte_length);
         return new String(string_data);
     }
+
     @Override
     public String toString() {
-        return new String(string_data);
+        return string_data;
     }
 }

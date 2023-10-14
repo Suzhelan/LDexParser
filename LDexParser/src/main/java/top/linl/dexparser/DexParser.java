@@ -2,14 +2,16 @@ package top.linl.dexparser;
 
 import top.linl.dexparser.bean.DexHeader;
 import top.linl.dexparser.bean.DexMap;
-import top.linl.dexparser.bean.ids.*;
+import top.linl.dexparser.bean.ids.DexClassDef;
+import top.linl.dexparser.bean.ids.DexFieldId;
+import top.linl.dexparser.bean.ids.DexMethodId;
+import top.linl.dexparser.bean.ids.DexProtoId;
+import top.linl.dexparser.bean.ids.DexStringId;
+import top.linl.dexparser.bean.ids.DexTypeId;
 import top.linl.dexparser.util.ByteReader;
 import top.linl.dexparser.util.ConversionUtils;
 
-import java.util.zip.ZipEntry;
-
 public class DexParser {
-    public ZipEntry entry;
     /**
      * 文件头
      */
@@ -39,11 +41,13 @@ public class DexParser {
      */
     public DexMethodId[] dexMethodIdsList;
     public DexClassDef[] dexClassDefList;
-    private ByteReader reader;
     public byte[] dexData;
+    private String dexName;
+    private ByteReader reader;
 
-    public DexParser(byte[] dexData) {
+    public DexParser(byte[] dexData, String dexName) {
         this.dexData = dexData;
+        this.setDexName(dexName);
         reader = new ByteReader(dexData);
         //解析文件头
         dexHeader = new DexHeader(reader);
@@ -53,18 +57,11 @@ public class DexParser {
         dexFieldIdsList = new DexFieldId[dexHeader.field_ids_size];
         dexMethodIdsList = new DexMethodId[dexHeader.method_ids_size];
         dexClassDefList = new DexClassDef[dexHeader.class_defs_size];
+
     }
 
-    public void setDexData(byte[] dexData) {
-        this.dexData = dexData;
-    }
+    public DexParser() {
 
-    /**
-     * 解析完使用完必须释放 否则内存占用会很高 当dex数量达到20个以上时这是不能接受的
-     */
-    public void closeDexData() {
-        this.dexData = null;
-        System.gc();
     }
 
     /**
@@ -101,16 +98,22 @@ public class DexParser {
      * 排除常用类
      */
     public static boolean isCommonlyUsedClass(String name) {
-        return name.startsWith("Ljava")
-                || name.startsWith("Landroid")
-                || name.startsWith("Lkotlin")
-                || name.startsWith("Lcom/android")
-                || name.startsWith("Lcom/google")
-                || name.startsWith("Lcom/microsoft")
-                || name.startsWith("Ldalvik");
+        return name.startsWith("Ljava") || name.startsWith("Landroid") || name.startsWith("Lkotlin") || name.startsWith("Lcom/android") || name.startsWith("Lcom/google") || name.startsWith("Lcom/microsoft") || name.startsWith("Ldalvik");
     }
 
-    public void init() {
+    public void setDexData(byte[] dexData) {
+        this.dexData = dexData;
+    }
+
+    /**
+     * 解析完使用完必须释放 否则内存占用会很高 当dex数量达到20个以上时这是不能接受的
+     */
+    public void closeDexData() {
+        this.dexData = null;
+        System.gc();
+    }
+
+    public void startParse() {
         //然后解析基本常量
         //映射表
         parseMap();
@@ -127,11 +130,12 @@ public class DexParser {
         //class_def
         parseClassDef();
 
-        //释放资源以节省内存
+        //释放不再使用的资源以节省内存
         dexHeader = null;
         dexMap = null;
         reader = null;
-        closeDexData();
+
+//        closeDexData();
 
     }
 
@@ -165,12 +169,13 @@ public class DexParser {
             int utf16_size = ConversionUtils.readULeb128(dexData, string_data_off);//第一位是字符串长度 是解码后的长度 不是字节数组长度
             //算出字符串真实字节长度
             int string_byte_length = 0;
-            while (dexData[++string_byte_length + string_data_off + 1] != '\0') ;//MUTF-8中不可能会出现字节/字符为0 如果为0说明该字符已经结束
+            while (dexData[++string_byte_length + string_data_off + 1] != '\0')
+                ;//MUTF-8中不可能会出现字节/字符为0 如果为0说明该字符已经结束
 
 //            byte[] string_data = Utils.copyArrays(dexData, string_data_off + 1, string_byte_length);
 //            String string = new String(string_data);
 
-            DexStringId dexStringId = new DexStringId(string_data_off,string_byte_length);
+            DexStringId dexStringId = new DexStringId(string_data_off, string_byte_length);
             dexStringIdsList[i] = dexStringId;
 //            System.out.println("String: " + i + " " + dexStringId.getString(this));
         }
@@ -206,8 +211,8 @@ public class DexParser {
         DexMap.Item field_item = dexMap.findItem(DexMap.TYPE_FIELD_ID_ITEM);
         reader.setStartPosition(field_item.offset);
         for (int i = 0; i < field_item.size; i++) {
-            short class_idx =(short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
-            short type_idx =(short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
+            short class_idx = (short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
+            short type_idx = (short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
             int name_idx = ConversionUtils.byteToUnsignedInt(reader.read(4));
             DexFieldId dexFieldId = new DexFieldId(class_idx, type_idx, name_idx);
             dexFieldIdsList[i] = dexFieldId;
@@ -218,8 +223,8 @@ public class DexParser {
         DexMap.Item method_item = dexMap.findItem(DexMap.TYPE_METHOD_ID_ITEM);
         reader.setStartPosition(method_item.offset);
         for (int i = 0; i < method_item.size; i++) {
-            short class_idx =(short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
-            short proto_idx =(short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
+            short class_idx = (short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
+            short proto_idx = (short) ConversionUtils.bytesToUnsignedShort(reader.read(2));
             int name_idx = ConversionUtils.byteToUnsignedInt(reader.read(4));
             DexMethodId dexMethodId = new DexMethodId(class_idx, proto_idx, name_idx);
             dexMethodIdsList[i] = dexMethodId;
@@ -317,9 +322,9 @@ public class DexParser {
 
                 if (methodId.getUsedStringList() == null) methodId.initUsedStringList();
                 methodId.getUsedStringList().add(string_idx);
-            } else if (invoke == 0x1B){//const-string/jumbo vAA, string@BBBBBBBB
+            } else if (invoke == 0x1B) {//const-string/jumbo vAA, string@BBBBBBBB
                 int string_idx = ConversionUtils.byteToUnsignedInt(codeReader.read(4));
-                i+=2;//4位已经被读走 需要略过两位指令
+                i += 2;//4位已经被读走 需要略过两位指令
                 if (string_idx >= dexStringIdsList.length) continue;
                 if (string_idx < 0) continue;
                 if (methodId.getUsedStringList() == null) methodId.initUsedStringList();
@@ -347,5 +352,14 @@ public class DexParser {
             int unused_2 = ConversionUtils.bytesToUnsignedShort(reader.read(2));
 
         }
+    }
+
+
+    public String getDexName() {
+        return dexName;
+    }
+
+    public void setDexName(String dexName) {
+        this.dexName = dexName;
     }
 }

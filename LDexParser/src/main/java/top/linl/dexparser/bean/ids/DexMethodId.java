@@ -1,13 +1,13 @@
 package top.linl.dexparser.bean.ids;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import top.linl.dexparser.DexParser;
 import top.linl.dexparser.util.ConversionUtils;
 import top.linl.dexparser.util.Utils;
 
-import java.util.ArrayList;
-import java.util.List;
-
-public class DexMethodId {
+public class DexMethodId extends BaseId {
     /**
      * 此方法的定义符的 type_ids 列表中的索引。此项必须是“类”或“数组”类型，而不能是“基元”类型。
      */
@@ -27,12 +27,20 @@ public class DexMethodId {
      */
     private List<Integer> usedStringList;
 
+    public DexMethodId() {
+
+    }
+
     public DexMethodId(short class_ids, short proto_idx, int name_idx) {
         this.class_ids = class_ids;
         this.proto_idx = proto_idx;
         this.name_idx = name_idx;
     }
 
+    public DexTypeId getReturnType(DexParser dexParser) {
+        DexProtoId dexProtoId = dexParser.dexDexProtoIdsList[proto_idx];
+        return dexParser.dexTypeIdsList[dexProtoId.return_type_idx];
+    }
 
     public DexTypeId[] getMethodParams(DexParser dexParser) {
         DexProtoId dexProtoId = dexParser.dexDexProtoIdsList[proto_idx];
@@ -46,6 +54,7 @@ public class DexMethodId {
         }
         return paramsList;
     }
+
     /**
      * @return 获得方法使用的字符串列表
      */

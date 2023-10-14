@@ -1,6 +1,6 @@
 package top.linl.dexparser.bean.ids;
 
-public class DexClassDef {
+public class DexClassDef extends BaseId {
     public int class_idx;
     public int access_flags;
     public int superclass_idx;

@@ -14,9 +14,9 @@ public class DexTypeUtils {
     }
 
     /**
-     * findClass
+     * find SmaliForm ClassName get Class
      *
-     * @param fullClassName Ljava/lang/fullClassName
+     * @param fullClassName Ljava/lang/fullClassName ? V
      * @return Class
      */
     public static Class<?> findClass(String fullClassName) {
@@ -27,9 +27,13 @@ public class DexTypeUtils {
             Class<?> simpleType = findSimpleType(fullClassName.charAt(0));
             CLASS_CACHE.put(fullClassName, simpleType);
             return simpleType;
+        } else if (isSimpleArray(fullClassName)) {
+            Class<?> simpleArrayType = findSimpleTypeArray(fullClassName);
+            CLASS_CACHE.put(fullClassName, simpleArrayType);
+            return simpleArrayType;
         } else {
             try {
-                String className = conversionType(fullClassName);
+                String className = conversionTypeName(fullClassName);
                 Class<?> result;
                 if (className.charAt(0) == '[') {
                     result = loader.loadClass(className.replace("[", ""));
@@ -53,11 +57,16 @@ public class DexTypeUtils {
         }
     }
 
-    public static String conversionType(String fullType) {
+    /**
+     * @param fullType Full ClassName
+     */
+    public static String conversionTypeName(String fullType) {
+        if (isSimpleArray(fullType)) return findSimpleTypeArray(fullType).getName();
+        if (fullType.length() == 1) return findSimpleType(fullType.charAt(0)).getName();
         StringBuilder sb = new StringBuilder(fullType);
-        sb.deleteCharAt(sb.indexOf("L"));//delete ['L'java/lang/name;
-        sb.deleteCharAt(sb.length() - 1);//delete [java/lang/name';'
-        int isFlag;
+        sb.deleteCharAt(sb.indexOf("L"));//delete ["L"java/lang/name;
+        sb.deleteCharAt(sb.length()-1);//delete [java/lang/name";"
+        int isFlag ;
         do {
             isFlag = sb.indexOf("/");
             if (isFlag != -1) {
@@ -67,6 +76,30 @@ public class DexTypeUtils {
         return sb.toString();
     }
 
+    public static Class<?> findSimpleTypeArray(String baseClassName) {
+        int baseTypeIndex = baseClassName.lastIndexOf('[') + 1;
+        Class<?> result = findSimpleType(baseClassName.charAt(baseTypeIndex));
+        for (int i = 0; i < baseClassName.length(); i++) {
+            char c = baseClassName.charAt(i);
+            if (c == '[') {
+                result = Array.newInstance(result, 0).getClass();
+            } else {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static boolean isSimpleArray(String className) {
+        int index = className.lastIndexOf('[');
+        return index != -1 && className.charAt(index + 1) != 'L';
+    }
+
+    /**
+     * conversion base type
+     *
+     * @param simpleType Smali Base Type V,Z,B,I...
+     */
     public static Class<?> findSimpleType(char simpleType) {
         switch (simpleType) {
             case 'V':
@@ -79,19 +112,14 @@ public class DexTypeUtils {
                 return short.class;
             case 'C':
                 return char.class;
-
             case 'I':
                 return int.class;
-
             case 'J':
                 return long.class;
-
             case 'F':
                 return float.class;
-
             case 'D':
                 return double.class;
-
         }
         throw new RuntimeException("Not an underlying type");
     }

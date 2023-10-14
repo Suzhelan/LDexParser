@@ -1,9 +1,9 @@
 package top.linl.dexparser.bean;
 
+import java.nio.charset.StandardCharsets;
+
 import top.linl.dexparser.util.ByteReader;
 import top.linl.dexparser.util.ConversionUtils;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  * @author suzhelan

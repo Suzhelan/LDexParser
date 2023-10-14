@@ -6,3 +6,8 @@ java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
 }
+
+dependencies {
+    implementation 'com.esotericsoftware:kryo:5.5.0'
+    implementation 'com.alibaba:fastjson:2.0.28'
+}

@@ -1,183 +1,308 @@
 package top.linl.dexparser;
 
-import top.linl.dexparser.bean.ids.DexMethodId;
-import top.linl.dexparser.bean.ids.DexTypeId;
-import top.linl.dexparser.util.DexTypeUtils;
-import top.linl.dexparser.util.FileUtils;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
-import java.lang.management.MemoryUsage;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
+import top.linl.dexparser.bean.ids.DexMethodId;
+import top.linl.dexparser.bean.ids.DexTypeId;
+import top.linl.dexparser.util.DexTypeUtils;
+import top.linl.dexparser.util.FileUtils;
+import top.linl.dexparser.util.Utils;
+
+/**
+ * 由于要读取dex的item 需要创建大量的对象造成大量内存开销
+ * 这在安卓上是不可容许的 内存开销大会造成界面无响应
+ */
 public class DexFinder {
 
-    public static int mThreadSize = 5;
-    private final ArrayList<DexParser> dexParsersList = new ArrayList<>();
-
-    private final ExecutorService dexInitTask = Executors.newFixedThreadPool(mThreadSize);
-    private final ZipFile apkZipFile;
+    private Builder builder;
+    private File[] cacheList;
 
     private CountDownLatch allTaskOver;
 
-    /**
-     * start build dexfinder
-     *
-     * @param classLoader host apk classloader
-     * @param apkFile apkPath
-     */
-    public static DexFinder builder(ClassLoader classLoader, File apkFile) throws Exception {
-        return new DexFinder(classLoader, apkFile);
+    private DexFinder() throws Exception {
+
     }
 
-    /**
-     * start build dexfinder
-     *
-     * @param classLoader host apk classloader
-     * @param apkFile apkPath
-     * @param threadSize Number of threads If the crash during initialization can be reduced to less than 5, this may be caused by high heap memory usage
-     */
-    public static DexFinder builder(ClassLoader classLoader, File apkFile, int threadSize) throws Exception {
-        mThreadSize = threadSize;
-        return new DexFinder(classLoader, apkFile);
+    public static ArrayList<DexParser> getDexParsersList() {
+        return Builder.dexParsersList;
     }
 
-    private DexFinder(ClassLoader loader, File apkFile) throws Exception {
-        DexTypeUtils.setClassLoader(loader);
-        apkZipFile = new ZipFile(apkFile);
-        ZipEntry entry; // 每一个压缩实体
-        InputStream inputStream = Files.newInputStream(apkFile.toPath());
-        ZipInputStream zipInput = new ZipInputStream(inputStream);
-        //遍历压缩包中的文件
-        while ((entry = zipInput.getNextEntry()) != null) { // 得到一个压缩实体
-            if (!entry.isDirectory() && entry.getName().endsWith(".dex")) {
-                ZipEntry finalEntry = entry;
-                dexInitTask.submit(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            InputStream stream = apkZipFile.getInputStream(finalEntry);
-                            byte[] dexData = FileUtils.readAllByte(stream, (int) finalEntry.getSize());
-                            stream.close();
-                            DexParser dexParser = new DexParser(dexData);
-                            dexParser.entry = finalEntry;
-                            dexParser.init();
-                            dexParsersList.add(dexParser);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                });
-            }
-        }
-        dexInitTask.shutdown();
-        while (true) {
-            if (dexInitTask.isTerminated()) {
-                System.out.println("init end");
-                break;
-            }
-        }
-        zipInput.close();
+    private void init() {
+
     }
 
     public ArrayList<Method> findMethodString(String str) throws Exception {
-        ArrayList<Method> result = new ArrayList<>();
-        ExecutorService findTaskList = Executors.newCachedThreadPool();
-        CountDownLatch countDownLatch = new CountDownLatch(dexParsersList.size());
-        for (DexParser dexParser : dexParsersList) {
-            findTaskList.submit(() -> {
-                InputStream stream;
-                try {
-                    stream = apkZipFile.getInputStream(dexParser.entry);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-                dexParser.setDexData(FileUtils.readAllByte(stream, (int) dexParser.entry.getSize()));
-                for (DexMethodId dexMethodId : dexParser.dexMethodIdsList) {
-                    if (dexMethodId.getUsedStringList() == null) continue;
-                    for (Integer integer : dexMethodId.getUsedStringList()) {
-                        String method_string = dexParser.dexStringIdsList[integer].getString(dexParser);
-                        if (method_string.contains(str)) {
-                            try {
-                                //get method info
-                                String methodName = dexParser.dexStringIdsList[dexMethodId.name_idx].getString(dexParser);
-                                String declareClass = dexParser.dexStringIdsList[dexParser.dexTypeIdsList[dexMethodId.class_ids].descriptor_idx].getString(dexParser);
-                                DexTypeId[] methodParams = dexMethodId.getMethodParams(dexParser);
-                                Class<?> clz = DexTypeUtils.findClass(declareClass);
-                                Class<?>[] params = new Class[methodParams.length];
-                                for (int i = 0; i < params.length; i++) {
-                                    String className = dexParser.dexStringIdsList[methodParams[i].descriptor_idx].getString(dexParser);
-                                    params[i] = DexTypeUtils.findClass(className);
-                                }
-                                Method method = clz.getDeclaredMethod(methodName, params);
-                                result.add(method);
-                            } catch (NoSuchMethodException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                    }
-                }
-                dexParser.closeDexData();
-                countDownLatch.countDown();
-            });
+        if (builder.cachedLocally()) {
+            return useLocalLookupMethodString(str);
+        } else {
+            return findMethodAppearedString(str);
         }
-        countDownLatch.await();//计数器等待线程池执行完成
-        findTaskList.shutdownNow();//防止跑到这一行 mian方法仍然在运行
-        return result;
     }
 
     public ArrayList<String> testFindMethodString(String str) throws Exception {
         ArrayList<String> result = new ArrayList<>();
-        ExecutorService executorService = Executors.newFixedThreadPool(mThreadSize);
-        CountDownLatch countDownLatch = new CountDownLatch(dexParsersList.size());
-        for (DexParser dexParser : dexParsersList) {
-            executorService.submit(() -> {
-                InputStream stream;
+        File[] cacheList = builder.getCacheList();
+        ExecutorService findTask = Executors.newFixedThreadPool(3);
+        for (File cacheFile : cacheList) {
+            findTask.execute(() -> {
                 try {
-                    stream = apkZipFile.getInputStream(dexParser.entry);
-                } catch (IOException e) {
+                    DexParser dexParser = (DexParser) FileUtils.readFileObject(cacheFile);
+                    result.addAll(testFindStringInWhichMethodAppears(dexParser, str));
+                } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
-                dexParser.setDexData(FileUtils.readAllByte(stream, (int) dexParser.entry.getSize()));
-                Loop:
-                for (DexMethodId dexMethodId : dexParser.dexMethodIdsList) {
-                    if (dexMethodId.getUsedStringList() == null) continue;
-                    for (Integer integer : dexMethodId.getUsedStringList()) {
-                        String method_string = dexParser.dexStringIdsList[integer].getString(dexParser);
-                        if (method_string.contains(str)) {
-                            String methodName = dexParser.dexStringIdsList[dexMethodId.name_idx].getString(dexParser);
-                            String declareClass = dexParser.dexStringIdsList[dexParser.dexTypeIdsList[dexMethodId.class_ids].descriptor_idx].getString(dexParser);
-                            DexTypeId[] methodParams = dexMethodId.getMethodParams(dexParser);
-                            result.add(declareClass + methodName);
-                            continue Loop;
-                        }
-                    }
-                }
-                dexParser.closeDexData();
-                countDownLatch.countDown();
             });
         }
-        countDownLatch.await();
-        executorService.shutdownNow();//防止跑到这一行 mian方法仍然在运行
+        findTask.shutdown();
+        findTask.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
         return result;
     }
 
-    public static class FindMethodTask implements Runnable {
+    /**
+     * 默认模式查找方法出现的字符串
+     */
+    private ArrayList<Method> findMethodAppearedString(String string) throws Exception {
+        ArrayList<Method> result = new ArrayList<>();
+        ExecutorService findTaskList = Executors.newFixedThreadPool(Builder.mThreadSize);
+        for (DexParser dexParser : getDexParsersList()) {
+            findTaskList.execute(() -> {
+                try {
+                    result.addAll(findStringInWhichMethodAppears(dexParser, string));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+        findTaskList.shutdown();
+        findTaskList.awaitTermination(15, TimeUnit.SECONDS);
+        return result;
+    }
 
-        @Override
-        public void run() {
+    /**
+     * Use local cache mode to find the string in which the method appears
+     * <p>
+     * {@link Builder#setCachePath(String)}
+     *
+     * @param str A string constant that appears inside a method
+     */
+    private ArrayList<Method> useLocalLookupMethodString(String str) throws Exception {
+        ArrayList<Method> result = new ArrayList<>();
+        File[] cacheList = builder.getCacheList();
+        ExecutorService findTask = Executors.newFixedThreadPool(Builder.mThreadSize);
+        for (File cacheFile : cacheList) {
+            findTask.execute(() -> {
+                try {
+                    DexParser dexParser = (DexParser) FileUtils.readFileObject(cacheFile);
+                    result.addAll(findStringInWhichMethodAppears(dexParser, str));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+        findTask.shutdown();
+        findTask.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+        return result;
+    }
 
+
+    private ArrayList<Method> findStringInWhichMethodAppears(DexParser dexParser, String string) throws NoSuchMethodException {
+        ArrayList<Method> result = new ArrayList<>();
+        MethodFor:
+        for (DexMethodId dexMethodId : dexParser.dexMethodIdsList) {
+            if (dexMethodId.getUsedStringList() == null) continue;
+            for (Integer integer : dexMethodId.getUsedStringList()) {
+                String method_string = dexParser.dexStringIdsList[integer].getString(dexParser);
+                if (method_string.contains(string)) {
+                    String methodName = dexParser.dexStringIdsList[dexMethodId.name_idx].getString(dexParser);
+                    String declareClass = dexParser.dexStringIdsList[dexParser.dexTypeIdsList[dexMethodId.class_ids].descriptor_idx].getString(dexParser);
+                    DexTypeId[] methodParams = dexMethodId.getMethodParams(dexParser);
+                    Class<?> clz = DexTypeUtils.findClass(declareClass);
+                    Class<?>[] params = new Class[methodParams.length];
+                    for (int i = 0; i < params.length; i++) {
+                        String className = dexParser.dexStringIdsList[methodParams[i].descriptor_idx].getString(dexParser);
+                        params[i] = DexTypeUtils.findClass(className);
+                    }
+                    Method method = clz.getDeclaredMethod(methodName, params);
+                    result.add(method);
+                    continue MethodFor;
+                }
+            }
+        }
+        System.gc();//Remind the JVM to free up memory This function is very effective
+        return result;
+    }
+
+    private ArrayList<String> testFindStringInWhichMethodAppears(DexParser dexParser, String string) {
+        ArrayList<String> result = new ArrayList<>();
+        MethodFor:
+        for (DexMethodId dexMethodId : dexParser.dexMethodIdsList) {
+            if (dexMethodId.getUsedStringList() == null) continue;
+            for (Integer integer : dexMethodId.getUsedStringList()) {
+                String method_string = dexParser.dexStringIdsList[integer].getString(dexParser);
+                if (method_string.contains(string)) {
+                    String methodName = dexParser.dexStringIdsList[dexMethodId.name_idx].getString(dexParser);
+                    String declareClass = dexParser.dexStringIdsList[dexParser.dexTypeIdsList[dexMethodId.class_ids].descriptor_idx].getString(dexParser);
+                    DexTypeId[] methodParams = dexMethodId.getMethodParams(dexParser);
+                    declareClass = DexTypeUtils.conversionTypeName(declareClass);
+                    JSONObject json = new JSONObject();
+                    json.put("DeclareClass", declareClass);
+                    json.put("MethodName", methodName);
+                    JSONArray params = new JSONArray();
+                    for (DexTypeId dexTypeId : methodParams) {
+                        params.add(DexTypeUtils.conversionTypeName(dexTypeId.getString(dexParser)));
+                    }
+                    json.put("Params", params);
+                    json.put("ReturnType", DexTypeUtils.conversionTypeName(dexMethodId.getReturnType(dexParser).getString(dexParser)));
+                    result.add(json.toString());
+                    continue MethodFor;
+                }
+            }
+        }
+        System.gc();//Remind the JVM to free up memory This function is very effective
+        return result;
+    }
+
+    /**
+     *
+     */
+    public void close() {
+        builder.close();
+    }
+
+    /**
+     * The constructor is responsible for local data interaction
+     */
+    public static class Builder {
+        private static final ArrayList<DexParser> dexParsersList = new ArrayList<>();
+        public static int mThreadSize = 3;
+
+        private final DexFinder dexFinder;
+        private final String apkPath;
+        private final ZipFile apkZipFile;
+        private String cachePath;
+
+        public Builder(ClassLoader classLoader, String apkPath) throws Exception {
+            dexFinder = new DexFinder();
+            dexFinder.builder = this;
+            this.apkPath = apkPath;
+            apkZipFile = new ZipFile(apkPath);
+        }
+
+        /**
+         * Release the cache file and trigger the GC
+         */
+        private void close() {
+            if (cachedLocally()) {
+
+                FileUtils.deleteFile(new File(this.cachePath));
+            }
+
+            System.gc();
+        }
+        private boolean cachedLocally() {
+            return this.cachePath != null;
+        }
+
+        /**
+         * Set cache directory ,
+         * If it is never set,
+         * the heap memory (mobile phone running memory) will be used as a buffer area,
+         * which can bring performance improvement,
+         * When the number of DEXs is large or the DEX memory consumption is large,
+         * it is best to use this method to set the cache path to prevent insufficient heap memory
+         */
+        public Builder setCachePath(String path) {
+            this.cachePath = path;
+            return this;
+        }
+
+        private boolean cacheToPath(DexParser dexParser) throws IOException {
+            String fileName = dexParser.getDexName() + ".parser";
+            FileUtils.writeObjectToFile(cachePath + "/" + fileName, dexParser);
+            return true;
+        }
+
+        private File[] getCacheList() {
+            return new File(cachePath).listFiles(pathname -> pathname.isFile() && pathname.getName().endsWith(".parser"));
+        }
+
+        public Builder setThreadNumber(int size) {
+            mThreadSize = size;
+            return this;
+        }
+
+        public DexFinder build() throws Exception {
+            //start parser all dex
+            initializeDexParserList();
+            this.dexFinder.init();
+            return dexFinder;
+        }
+
+        private void initializeDexParserList() throws Exception {
+
+            InputStream inputStream = Files.newInputStream(new File(this.apkPath).toPath());
+            //zip read
+            ZipInputStream zipInput = new ZipInputStream(inputStream);
+            //task list
+            ExecutorService dexInitTask = Executors.newFixedThreadPool(mThreadSize);
+            Enumeration<? extends ZipEntry> entries = apkZipFile.entries();
+
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (entry.isDirectory() || !entry.getName().endsWith(".dex")) continue;
+                dexInitTask.submit(() -> {
+                    try {
+                        Utils.MTimer mTimer = new Utils.MTimer();
+                        //read dex file stream
+                        InputStream stream = this.apkZipFile.getInputStream(entry);
+                        byte[] dexData = FileUtils.readAllByte(stream, (int) entry.getSize());
+                        stream.close();
+
+                        //start parse the dex File
+                        DexParser dexParser = new DexParser(dexData, entry.getName());
+                        dexParser.startParse();
+
+                        //LocallyMode , cacheToLocally
+                        if (cachedLocally()) {
+                            cacheToPath(dexParser);
+                        } else {
+                            getDexParsersList().add(dexParser);
+                        }
+
+                        System.out.println(" 初始化耗时" + mTimer.get());
+                        System.gc();
+                        Utils.outMemory();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+            }
+            dexInitTask.shutdown();//stop add task
+            while (true) {
+                if (dexInitTask.isTerminated()) {
+                    System.out.println("init end");
+                    break;
+                }
+            }
+            zipInput.close();
+            inputStream.close();
         }
     }
+
 }
