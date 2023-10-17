@@ -287,7 +287,6 @@ public class DexFinder {
 
                         System.out.println(" 初始化耗时" + mTimer.get());
                         System.gc();
-                        Utils.outMemory();
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
