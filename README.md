@@ -12,7 +12,7 @@ Android Dex parser
 ```java
                 //先初始化 参数一是目标应用类加载器 参数二是目标类路径
                 DexFinder dexFinder = new DexFinder.Builder(ClassUtils.getHostLoader(), HookEnv.getHostApkPath())
-                        .setCachePath(PathTool.getModuleDataPath() + "/MethodFinderCache")//设置运行缓存路径 将使用本地内存代表堆内存 这样可以在解析大且多的dex时造成堆溢出
+                        .setCachePath(PathTool.getModuleDataPath() + "/MethodFinderCache")//设置运行缓存路径 将使用本地内存代表堆内存 这样可以避免在解析大且多的dex时造成堆溢出
                         .setOnProgress(new DexFinder.OnProgress() {
                             //重写此方法以监听dex解析数量情况 可以用作通知View解析进度
                     @Override
