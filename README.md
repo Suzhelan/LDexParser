@@ -24,7 +24,7 @@ Android Dex parser
                     public void parse(int progress, String dexName) {
                         new Handler(Looper.getMainLooper()).post(() -> loadingDialog.progressBar.setProgress(progress));
                     }
-                }).build();//调用build方法后会开始解析 目测300MB的qq解析时间在20s内
+                }).build();//调用build方法后会开始解析 目测300MB的qq解析时间在8 - 20s内
 ```
 第二步 分析查找  
 我们可以通过jadx或者mt管理器来分析出方法内具体做了什么  
