@@ -42,5 +42,5 @@ public class a {
 ```java
     //查找方法内包含"/data/simple/"字符串的方法
     ArrayList<Method> methodList = dexFinder.findMethodString("/data/simple/");
-    //findMethodString返回的是一个ArrayList查找所有符合的方法 查找不到不会为null而是为size == 0
+    //findMethodString返回的是一个ArrayList , 查找所有符合的方法 查找不到不会为null而是为size == 0
 ```
