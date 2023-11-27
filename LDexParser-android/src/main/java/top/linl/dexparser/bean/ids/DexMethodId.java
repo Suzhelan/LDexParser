@@ -7,7 +7,7 @@ import top.linl.dexparser.DexParser;
 import top.linl.dexparser.util.ConversionUtils;
 import top.linl.dexparser.util.Utils;
 
-public class DexMethodId extends BaseId {
+public class DexMethodId {
     /**
      * 此方法的定义符的 type_ids 列表中的索引。此项必须是“类”或“数组”类型，而不能是“基元”类型。
      */
@@ -26,10 +26,6 @@ public class DexMethodId extends BaseId {
      * 方法使用的字符串列表 指向string_ids
      */
     private List<Integer> usedStringList;
-
-    public DexMethodId() {
-
-    }
 
     public DexMethodId(short class_ids, short proto_idx, int name_idx) {
         this.class_ids = class_ids;

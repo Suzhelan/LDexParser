@@ -4,16 +4,18 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -22,7 +24,6 @@ import top.linl.dexparser.bean.ids.DexMethodId;
 import top.linl.dexparser.bean.ids.DexTypeId;
 import top.linl.dexparser.util.DexTypeUtils;
 import top.linl.dexparser.util.FileUtils;
-import top.linl.dexparser.util.Utils;
 
 /**
  * 由于要读取dex的item 需要创建大量的对象造成大量内存开销
@@ -31,7 +32,6 @@ import top.linl.dexparser.util.Utils;
 public class DexFinder {
 
     private Builder builder;
-    private File[] cacheList;
 
     private CountDownLatch allTaskOver;
 
@@ -130,6 +130,9 @@ public class DexFinder {
                 String method_string = dexParser.dexStringIdsList[integer].getString(dexParser);
                 if (method_string.contains(string)) {
                     String methodName = dexParser.dexStringIdsList[dexMethodId.name_idx].getString(dexParser);
+                    if (methodName.equals("<init>") || methodName.equals("<cinit>")) {
+                        continue MethodFor;
+                    }
                     String declareClass = dexParser.dexStringIdsList[dexParser.dexTypeIdsList[dexMethodId.class_ids].descriptor_idx].getString(dexParser);
                     DexTypeId[] methodParams = dexMethodId.getMethodParams(dexParser);
                     Class<?> clz = DexTypeUtils.findClass(declareClass);
@@ -178,9 +181,13 @@ public class DexFinder {
         return result;
     }
 
-    /**
-     *
-     */
+    public static Builder builder(ClassLoader classLoader,String apkPath) throws Exception {
+        return new Builder(classLoader, apkPath);
+    }
+
+    public static Builder builder(String apkPath) throws Exception {
+        return new Builder(apkPath);
+    }
     public void close() {
         builder.close();
     }
@@ -197,6 +204,7 @@ public class DexFinder {
         private final ZipFile apkZipFile;
         private String cachePath;
 
+        private OnProgress mOnProgress;
         public Builder(ClassLoader classLoader, String apkPath) throws Exception {
             DexTypeUtils.setClassLoader(classLoader);
             dexFinder = new DexFinder();
@@ -205,15 +213,28 @@ public class DexFinder {
             apkZipFile = new ZipFile(apkPath);
         }
 
+        public Builder(String apkPath) throws Exception {
+            dexFinder = new DexFinder();
+            dexFinder.builder = this;
+            this.apkPath = apkPath;
+            apkZipFile = new ZipFile(apkPath);
+        }
+
+        /**
+         * 设置此方法以监听解析进度
+         *
+         */
+        public Builder setOnProgress(OnProgress onProgress) {
+            this.mOnProgress = onProgress;
+            return this;
+        }
         /**
          * Release the cache file and trigger the GC
          */
         private void close() {
             if (cachedLocally()) {
-
                 FileUtils.deleteFile(new File(this.cachePath));
             }
-
             System.gc();
         }
         private boolean cachedLocally() {
@@ -257,19 +278,23 @@ public class DexFinder {
 
         private void initializeDexParserList() throws Exception {
 
-            InputStream inputStream = Files.newInputStream(new File(this.apkPath).toPath());
+            InputStream inputStream = new FileInputStream(new File(this.apkPath));
             //zip read
             ZipInputStream zipInput = new ZipInputStream(inputStream);
             //task list
             ExecutorService dexInitTask = Executors.newFixedThreadPool(mThreadSize);
             Enumeration<? extends ZipEntry> entries = apkZipFile.entries();
-
+            List<ZipEntry> dexFileList = new ArrayList<>();
             while (entries.hasMoreElements()) {
                 ZipEntry entry = entries.nextElement();
                 if (entry.isDirectory() || !entry.getName().endsWith(".dex")) continue;
+                dexFileList.add(entry);
+            }
+            if (this.mOnProgress != null) mOnProgress.init(dexFileList.size());
+            AtomicInteger progress = new AtomicInteger();
+            for (ZipEntry entry : dexFileList) {
                 dexInitTask.submit(() -> {
                     try {
-                        Utils.MTimer mTimer = new Utils.MTimer();
                         //read dex file stream
                         InputStream stream = this.apkZipFile.getInputStream(entry);
                         byte[] dexData = FileUtils.readAllByte(stream, (int) entry.getSize());
@@ -286,8 +311,8 @@ public class DexFinder {
                             getDexParsersList().add(dexParser);
                         }
 
-                        System.out.println(" 初始化耗时" + mTimer.get());
                         System.gc();
+                        if (this.mOnProgress != null) mOnProgress.parse(progress.getAndIncrement(),entry.getName());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -299,10 +324,19 @@ public class DexFinder {
                     System.out.println("init end");
                     break;
                 }
+                Thread.sleep(1);
             }
             zipInput.close();
             inputStream.close();
         }
     }
 
+    /**
+     * 进度
+     */
+    public static interface OnProgress {
+        public void init(int dexSize);
+
+        public void parse(int progress,String dexName);
+    }
 }

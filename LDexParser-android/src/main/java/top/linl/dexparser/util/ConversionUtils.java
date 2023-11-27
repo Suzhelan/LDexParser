@@ -56,7 +56,7 @@ public class ConversionUtils {
             }
             sb.append(hex);
         }
-        return sb.toString();
+        return sb.toString().toUpperCase();
     }
 
 

@@ -1,5 +1,6 @@
 package top.linl.dexparser;
 
+import android.os.IInterface;
 import top.linl.dexparser.bean.DexHeader;
 import top.linl.dexparser.bean.DexMap;
 import top.linl.dexparser.bean.ids.DexClassDef;
@@ -10,6 +11,7 @@ import top.linl.dexparser.bean.ids.DexStringId;
 import top.linl.dexparser.bean.ids.DexTypeId;
 import top.linl.dexparser.util.ByteReader;
 import top.linl.dexparser.util.ConversionUtils;
+import top.linl.dexparser.util.Utils;
 
 public class DexParser {
     /**
@@ -51,6 +53,7 @@ public class DexParser {
         reader = new ByteReader(dexData);
         //解析文件头
         dexHeader = new DexHeader(reader);
+        //解析各项数量与初始化
         dexStringIdsList = new DexStringId[dexHeader.string_ids_size];
         dexTypeIdsList = new DexTypeId[dexHeader.type_ids_size];
         dexDexProtoIdsList = new DexProtoId[dexHeader.proto_ids_size];
@@ -62,43 +65,6 @@ public class DexParser {
 
     public DexParser() {
 
-    }
-
-    /**
-     * 将16进制的int分析成数组
-     */
-    public static int[] SplitHexInt(int decnum) {
-        //本来就小于两位的可以直接不执行
-        int i, calnum, n, divisor = 4096, k = 4;
-        int[] arr = new int[4];
-        int[] result = new int[2];
-
-        //从高位起，算每个位的数，分离单独存储
-        if (decnum < 0x0100) {
-            result[1] = decnum;
-            return result;
-        }
-        for (calnum = decnum, i = 0; calnum != 0 || k != 0; divisor /= 16, k--, i++) {
-            n = 0;
-            //拆解数
-            while (calnum - divisor >= 0) {
-                calnum -= divisor;
-                n++;
-            }
-            //将分离出的数进行存储
-            arr[i] = n;
-        }
-        //组合数
-        result[0] = arr[0] * 16 + arr[1];
-        result[1] = arr[2] * 16 + arr[3];
-        return result;
-    }
-
-    /**
-     * 排除常用类
-     */
-    public static boolean isCommonlyUsedClass(String name) {
-        return name.startsWith("Ljava") || name.startsWith("Landroid") || name.startsWith("Lkotlin") || name.startsWith("Lcom/android") || name.startsWith("Lcom/google") || name.startsWith("Lcom/microsoft") || name.startsWith("Ldalvik");
     }
 
     public void setDexData(byte[] dexData) {
@@ -182,6 +148,8 @@ public class DexParser {
     }
 
     private void parseType() {
+        DexMap.Item typeIdItem = dexMap.findItem(DexMap.TYPE_TYPE_ID_ITEM);
+        reader.setStartPosition(typeIdItem.offset);
         for (int i = 0; i < dexHeader.type_ids_size; i++) {
             int descriptor_idx = ConversionUtils.byteToUnsignedInt(reader.read(4));
             DexTypeId dexTypeId = new DexTypeId(descriptor_idx);
@@ -246,6 +214,8 @@ public class DexParser {
             int class_data_off = ConversionUtils.byteToUnsignedInt(reader.read(4));
             int static_values_off = ConversionUtils.byteToUnsignedInt(reader.read(4));
 
+            DexClassDef dexClassDef = new DexClassDef(class_idx, access_flags, superclass_idx, interfaces_off, source_file_idx, annotations_off, class_data_off, static_values_off);
+            dexClassDefList[i] = dexClassDef;
             parseClassData(class_data_off);
         }
     }
@@ -263,6 +233,8 @@ public class DexParser {
         int direct_methods_size = classDataReader.readUnsignedLeb128();
         int virtual_methods_size = classDataReader.readUnsignedLeb128();
 
+        //index 表示的是该字段/方法在 FieldIdsList/MethodIdsList中的索引
+        //每次获取到的是上一个index的差值 不会为负 如果是第一个则直接返回索引而不是差值
         int index = -1;
         for (int i = 0; i < static_fields_size; i++) {
             int field_idx_diff = index == -1 ? (index = classDataReader.readUnsignedLeb128()) : (index += classDataReader.readUnsignedLeb128());
@@ -277,6 +249,7 @@ public class DexParser {
         for (int i = 0; i < direct_methods_size; i++) {
             int method_idx_diff = (index == -1 ? (index = classDataReader.readUnsignedLeb128()) : (index += classDataReader.readUnsignedLeb128()));
             int access_flags = classDataReader.readUnsignedLeb128();
+            //表示方法开始的指令集偏移量
             int code_off = classDataReader.readUnsignedLeb128();
             DexMethodId dexMethodId = dexMethodIdsList[method_idx_diff];
             paresMethodInstructionSet(dexMethodId, code_off);
@@ -313,13 +286,12 @@ public class DexParser {
         for (int i = 0; i < insns_size; i++) {
             int insns = ConversionUtils.bytesToUnsignedShort(codeReader.read(2));
             //返回的第一位是v?寄存器 第二位可能是指令
-            int invoke = SplitHexInt(insns)[1];
+            int invoke = Utils.SplitHexInt(insns)[1];
             if (invoke == 0x1A) {//const-string vAA, string@BBBB
 //                int string_idx = ConversionUtils.bytesToUnsignedShort(Utils.copyArrays(dexData, codeReader.getPosition(), 2));
                 int string_idx = ConversionUtils.bytesToUnsignedShort(codeReader.read(2));
                 i++;
                 if (string_idx > dexStringIdsList.length) continue;
-
                 if (methodId.getUsedStringList() == null) methodId.initUsedStringList();
                 methodId.getUsedStringList().add(string_idx);
             } else if (invoke == 0x1B) {//const-string/jumbo vAA, string@BBBBBBBB
@@ -333,6 +305,9 @@ public class DexParser {
         }
     }
 
+    /**
+     * 未使用
+     */
     public void parseCallSite() {
         DexMap.Item call_site_item = dexMap.findItem(DexMap.TYPE_CALL_SITE_ID_ITEM);
         reader.setStartPosition(call_site_item.offset);
@@ -342,6 +317,9 @@ public class DexParser {
         }
     }
 
+    /**
+     * 未使用
+     */
     public void parseMethodHandle() {
         DexMap.Item item = dexMap.findItem(DexMap.TYPE_METHOD_HANDLE_ITEM);
         reader.setStartPosition(item.offset);
