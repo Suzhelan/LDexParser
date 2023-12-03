@@ -10,7 +10,7 @@ Android Dex parser
 ---
 基本实现 第一步
 ```java
-                //先初始化 参数一是目标应用类加载器 参数二是目标类路径
+                //先初始化 参数一是目标应用类加载器 参数二是apk路径
                 DexFinder dexFinder = new DexFinder.Builder(ClassUtils.getHostLoader(), HookEnv.getHostApkPath())
                         .setCachePath(PathTool.getModuleDataPath() + "/MethodFinderCache")//设置运行缓存路径 将使用本地内存代表堆内存 这样可以避免在解析大且多的dex时造成堆溢出
                         .setOnProgress(new DexFinder.OnProgress() {
